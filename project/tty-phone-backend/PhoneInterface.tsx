@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Phone, PhoneCall, PhoneOff, Volume2, Settings, MessageCircle, Keyboard } from 'lucide-react';
+import { Phone, PhoneCall, PhoneOff, Volume2, Settings, MessageCircle, Keyboard, Play, Pause } from 'lucide-react';
 import axios from 'axios';
 
 // Backend API configuration
@@ -12,7 +12,6 @@ interface CallState {
   startTime: Date | null;
   duration: string;
   callSid: string | null;
-  conferenceSid: string | null;
 }
 
 interface Message {
@@ -20,6 +19,20 @@ interface Message {
   text: string;
   timestamp: Date;
   spoken: boolean;
+}
+
+interface Transcription {
+  text: string;
+  timestamp: Date;
+  recordingSid?: string;
+  recordingUrl?: string;
+}
+
+interface Recording {
+  url: string;
+  timestamp: Date;
+  recordingSid: string;
+  transcription: string | null;
 }
 
 interface SpeechSettings {
@@ -36,14 +49,16 @@ const PhoneInterface: React.FC = () => {
     phoneNumber: '',
     startTime: null,
     duration: '00:00:00',
-    callSid: null,
-    conferenceSid: null
+    callSid: null
   });
 
   const [currentMessage, setCurrentMessage] = useState('');
   const [messageHistory, setMessageHistory] = useState<Message[]>([]);
-  const [transcriptions, setTranscriptions] = useState<Array<{text: string, timestamp: Date}>>([]);
+  const [transcriptions, setTranscriptions] = useState<Transcription[]>([]);
+  const [recordings, setRecordings] = useState<Recording[]>([]);
   const [showSettings, setShowSettings] = useState(false);
+  const [audioPlaybackEnabled, setAudioPlaybackEnabled] = useState(false);
+  const [currentlyPlaying, setCurrentlyPlaying] = useState<string | null>(null);
   const [speechSettings, setSpeechSettings] = useState<SpeechSettings>({
     rate: 1.0,
     pitch: 1.0,
@@ -55,6 +70,7 @@ const PhoneInterface: React.FC = () => {
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const durationIntervalRef = useRef<number | null>(null);
   const statusCheckIntervalRef = useRef<number | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   // Quick response templates
   const quickResponses = [
@@ -86,14 +102,14 @@ const PhoneInterface: React.FC = () => {
     };
   }, []);
 
-  // Monitor call status and transcriptions in real-time
+  // Real-time monitoring for transcriptions and recordings
   useEffect(() => {
     if (callState.isActive && callState.callSid) {
       statusCheckIntervalRef.current = window.setInterval(async () => {
         try {
           const response = await axios.get(`${API_BASE_URL}/api/call-status/${callState.callSid}`);
           if (response.data.success) {
-            const { status, isActive, transcriptions: serverTranscriptions } = response.data;
+            const { isActive, transcriptions: serverTranscriptions, recordings: serverRecordings } = response.data;
             
             if (!isActive && callState.isActive) {
               console.log('Call ended remotely');
@@ -104,28 +120,39 @@ const PhoneInterface: React.FC = () => {
               }));
               setMessageHistory([]);
               setTranscriptions([]);
+              setRecordings([]);
             }
             
-            // Update transcriptions if available
-            if (serverTranscriptions && serverTranscriptions.length > 0) {
-              const formattedTranscriptions = serverTranscriptions.map((t: any) => ({
+            // Update transcriptions (real-time)
+            if (serverTranscriptions && serverTranscriptions.length > transcriptions.length) {
+              const newTranscriptions = serverTranscriptions.map((t: any) => ({
                 text: t.text,
-                timestamp: new Date(t.timestamp)
+                timestamp: new Date(t.timestamp),
+                recordingSid: t.recordingSid,
+                recordingUrl: t.recordingUrl
               }));
               
-              setTranscriptions(prev => {
-                if (prev.length !== formattedTranscriptions.length) {
-                  console.log('New transcription received:', formattedTranscriptions[formattedTranscriptions.length - 1]);
-                  return formattedTranscriptions;
-                }
-                return prev;
-              });
+              setTranscriptions(newTranscriptions);
+              console.log('New transcription received:', newTranscriptions[newTranscriptions.length - 1]);
+            }
+            
+            // Update recordings for audio playback
+            if (serverRecordings && serverRecordings.length > recordings.length) {
+              const newRecordings = serverRecordings.map((r: any) => ({
+                url: r.url,
+                timestamp: new Date(r.timestamp),
+                recordingSid: r.recordingSid,
+                transcription: r.transcription
+              }));
+              
+              setRecordings(newRecordings);
+              console.log('New recording available:', newRecordings[newRecordings.length - 1]);
             }
           }
         } catch (error) {
           console.error('Error checking call status:', error);
         }
-      }, 3000); // Check every 3 seconds for transcriptions
+      }, 2000); // Check every 2 seconds for faster updates
     } else if (statusCheckIntervalRef.current) {
       clearInterval(statusCheckIntervalRef.current);
     }
@@ -135,7 +162,7 @@ const PhoneInterface: React.FC = () => {
         clearInterval(statusCheckIntervalRef.current);
       }
     };
-  }, [callState.isActive, callState.callSid]);
+  }, [callState.isActive, callState.callSid, transcriptions.length, recordings.length]);
 
   // Update call duration
   useEffect(() => {
@@ -201,11 +228,13 @@ const PhoneInterface: React.FC = () => {
       try {
         const response = await axios.post(`${API_BASE_URL}/api/speak-text`, {
           callSid: callState.callSid,
-          text
+          text,
+          voice: speechSettings.voice,
+          rate: speechSettings.rate.toString()
         });
 
         if (response.data.success) {
-          console.log('Message sent to phone successfully');
+          console.log('Message sent successfully (no repetition)');
           
           // Add to message history
           const newMessage: Message = {
@@ -219,11 +248,38 @@ const PhoneInterface: React.FC = () => {
           setCurrentMessage('');
         }
       } catch (error) {
-        console.error('Error sending message to phone:', error);
-        alert('Failed to send message to phone. Check backend connection.');
+        console.error('Error sending message:', error);
+        alert('Failed to send message. Check backend connection.');
       }
     } else {
       alert('Please start a call first');
+    }
+  };
+
+  const playRecording = async (recordingUrl: string, recordingSid: string) => {
+    if (currentlyPlaying === recordingSid) {
+      // Stop current playback
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      setCurrentlyPlaying(null);
+      return;
+    }
+
+    try {
+      if (audioRef.current) {
+        audioRef.current.src = recordingUrl;
+        audioRef.current.play();
+        setCurrentlyPlaying(recordingSid);
+        
+        audioRef.current.onended = () => {
+          setCurrentlyPlaying(null);
+        };
+      }
+    } catch (error) {
+      console.error('Error playing recording:', error);
+      alert('Unable to play recording');
     }
   };
 
@@ -257,8 +313,7 @@ const PhoneInterface: React.FC = () => {
           isActive: true,
           isConnecting: false,
           startTime: new Date(),
-          callSid: response.data.callSid,
-          conferenceSid: response.data.conferenceSid
+          callSid: response.data.callSid
         }));
       } else {
         throw new Error(response.data.error || 'Failed to initiate call');
@@ -302,11 +357,12 @@ const PhoneInterface: React.FC = () => {
       phoneNumber: callState.phoneNumber,
       startTime: null,
       duration: '00:00:00',
-      callSid: null,
-      conferenceSid: null
+      callSid: null
     });
     setMessageHistory([]);
     setTranscriptions([]);
+    setRecordings([]);
+    setCurrentlyPlaying(null);
     speechSynthesis.cancel();
   };
 
@@ -319,10 +375,12 @@ const PhoneInterface: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4">
+      <audio ref={audioRef} style={{ display: 'none' }} />
+      
       <div className="max-w-4xl mx-auto">
         <header className="text-center mb-8">
           <h1 className="text-4xl font-bold text-slate-800 mb-2">TTY Phone Interface</h1>
-          <p className="text-lg text-slate-600">Real-time 2-way communication with speech-to-text transcription</p>
+          <p className="text-lg text-slate-600">Real-time 2-way communication with instant transcription & audio playback</p>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -394,11 +452,29 @@ const PhoneInterface: React.FC = () => {
                       To: {callState.phoneNumber}
                     </div>
                     <div className="text-xs text-green-600 mt-2 p-2 bg-green-100 rounded">
-                      <strong>2-Way Communication Active:</strong> Your messages are spoken to them. 
-                      Their responses are automatically transcribed below.
+                      <strong>✅ Improved System:</strong> Messages spoken once (no repetition). 
+                      Real-time transcription every 2-3 seconds.
                     </div>
                   </div>
                 )}
+
+                {/* Audio Playback Toggle */}
+                <div className="border-t pt-4">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={audioPlaybackEnabled}
+                      onChange={(e) => setAudioPlaybackEnabled(e.target.checked)}
+                      className="rounded"
+                    />
+                    <span className="text-sm font-medium text-slate-700">
+                      Enable Audio Playback
+                    </span>
+                  </label>
+                  <p className="text-xs text-slate-500 mt-1">
+                    For users who can hear but cannot speak
+                  </p>
+                </div>
 
                 <button
                   onClick={() => setShowSettings(!showSettings)}
@@ -518,11 +594,11 @@ const PhoneInterface: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Live Transcription Display */}
+                {/* Real-time Transcription & Audio Playback */}
                 {callState.isActive && (
                   <div className="border-t pt-4">
                     <h3 className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-2">
-                      🎤 Their Responses (Live Transcription)
+                      🎤 Their Responses (Real-time - 2-3 second updates)
                       {transcriptions.length === 0 && (
                         <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                       )}
@@ -530,19 +606,36 @@ const PhoneInterface: React.FC = () => {
                     <div className="max-h-60 overflow-y-auto space-y-2 bg-blue-50 rounded-lg p-3">
                       {transcriptions.length === 0 ? (
                         <div className="text-sm text-blue-600 italic">
-                          🎧 Listening for their response... After you send a message, they can speak and it will appear here.
+                          🎧 Listening for their response... Real-time transcription active.
                           <div className="text-xs mt-1 text-blue-500">
-                            (Transcription appears automatically after they finish speaking)
+                            (Updates every 2-3 seconds - much faster than before!)
                           </div>
                         </div>
                       ) : (
                         transcriptions.map((transcription, index) => (
                           <div key={index} className="bg-white rounded-lg p-3 text-sm border border-blue-200">
-                            <div className="text-blue-800 font-medium">
-                              💬 "{transcription.text}"
-                            </div>
-                            <div className="text-xs text-blue-600 mt-1">
-                              📅 {transcription.timestamp.toLocaleTimeString()}
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1">
+                                <div className="text-blue-800 font-medium">
+                                  💬 "{transcription.text}"
+                                </div>
+                                <div className="text-xs text-blue-600 mt-1">
+                                  📅 {transcription.timestamp.toLocaleTimeString()}
+                                </div>
+                              </div>
+                              {audioPlaybackEnabled && transcription.recordingUrl && (
+                                <button
+                                  onClick={() => playRecording(transcription.recordingUrl!, transcription.recordingSid!)}
+                                  className="ml-2 p-1 bg-blue-100 hover:bg-blue-200 rounded-full transition-colors"
+                                  title="Play audio"
+                                >
+                                  {currentlyPlaying === transcription.recordingSid ? (
+                                    <Pause className="w-4 h-4 text-blue-600" />
+                                  ) : (
+                                    <Play className="w-4 h-4 text-blue-600" />
+                                  )}
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))
@@ -562,7 +655,7 @@ const PhoneInterface: React.FC = () => {
                         >
                           <div className="text-green-800 font-medium">"{message.text}"</div>
                           <div className="text-xs text-green-600 mt-1">
-                            ✅ Spoken at {message.timestamp.toLocaleTimeString()}
+                            ✅ Spoken at {message.timestamp.toLocaleTimeString()} (no repetition)
                           </div>
                         </div>
                       ))}
@@ -578,43 +671,36 @@ const PhoneInterface: React.FC = () => {
         <div className="mt-6 bg-white rounded-2xl shadow-xl p-6 border border-slate-200">
           <h3 className="text-lg font-semibold text-slate-800 mb-3 flex items-center gap-2">
             <Keyboard className="w-5 h-5" />
-            How It Works
+            Improved System Features
           </h3>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
             <div>
-              <h4 className="font-medium text-slate-700 mb-2">🔄 2-Way Communication</h4>
+              <h4 className="font-medium text-slate-700 mb-2">🚀 What's Fixed</h4>
               <div className="space-y-2 text-slate-600">
-                <p>• <strong>You → Them:</strong> Type messages that are spoken clearly</p>
-                <p>• <strong>Them → You:</strong> Their speech is automatically transcribed to text</p>
-                <p>• <strong>Real-time:</strong> Transcriptions appear within seconds</p>
-                <p>• <strong>Conference-based:</strong> Reliable connection with recording</p>
+                <p>• <strong>No More Repetition:</strong> Messages spoken once only</p>
+                <p>• <strong>Real-time Transcription:</strong> Updates every 2-3 seconds</p>
+                <p>• <strong>Audio Playback:</strong> Hear their actual voice (optional)</p>
+                <p>• <strong>Better Call Flow:</strong> Less frustrating for recipients</p>
               </div>
             </div>
             
             <div>
-              <h4 className="font-medium text-slate-700 mb-2">⌨️ Keyboard Shortcuts</h4>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <kbd className="px-2 py-1 bg-slate-100 rounded text-xs">Ctrl+Enter</kbd>
-                  <span>Send message</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <kbd className="px-2 py-1 bg-slate-100 rounded text-xs">Ctrl+D</kbd>
-                  <span>Start/End call</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <kbd className="px-2 py-1 bg-slate-100 rounded text-xs">Ctrl+K</kbd>
-                  <span>Focus text input</span>
-                </div>
+              <h4 className="font-medium text-slate-700 mb-2">🎯 Perfect For</h4>
+              <div className="space-y-2 text-slate-600">
+                <p>• <strong>Deaf + Mute:</strong> Text transcription only</p>
+                <p>• <strong>Mute Only:</strong> Enable audio playback to hear responses</p>
+                <p>• <strong>Any Disability:</strong> Flexible communication options</p>
+                <p>• <strong>Real Conversations:</strong> Natural back-and-forth flow</p>
               </div>
             </div>
           </div>
           
           <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
             <p className="text-sm text-green-800">
-              <strong>✨ Perfect for deaf users:</strong> Complete 2-way TTY system with real-time transcription. 
-              No need for separate phones or interpreters - everything happens in this interface!
+              <strong>✨ Much Better Experience:</strong> No more annoying repetition for call recipients. 
+              Real-time transcription means you see their responses almost immediately. Audio playback 
+              option for users who can hear but cannot speak.
             </p>
           </div>
         </div>
