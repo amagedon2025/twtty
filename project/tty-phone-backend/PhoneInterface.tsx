@@ -63,7 +63,7 @@ const PhoneInterface: React.FC = () => {
     rate: 1.0,
     pitch: 1.0,
     volume: 1.0,
-    voice: ''
+    voice: 'alice'
   });
 
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -89,8 +89,16 @@ const PhoneInterface: React.FC = () => {
     const loadVoices = () => {
       const voices = speechSynthesis.getVoices();
       setAvailableVoices(voices);
-      if (voices.length > 0 && !speechSettings.voice) {
-        setSpeechSettings(prev => ({ ...prev, voice: voices[0].name }));
+      if (voices.length > 0 && speechSettings.voice === 'alice') {
+        // Find a good default voice or keep 'alice'
+        const preferredVoice = voices.find(v => 
+          v.name.toLowerCase().includes('female') || 
+          v.name.toLowerCase().includes('woman') ||
+          v.name.toLowerCase().includes('alice')
+        );
+        if (preferredVoice) {
+          setSpeechSettings(prev => ({ ...prev, voice: preferredVoice.name }));
+        }
       }
     };
 
@@ -510,12 +518,18 @@ const PhoneInterface: React.FC = () => {
                         onChange={(e) => setSpeechSettings(prev => ({ ...prev, voice: e.target.value }))}
                         className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       >
+                        <option value="alice">Alice (Twilio Default - Female)</option>
+                        <option value="man">Man (Twilio Default - Male)</option>
+                        <option value="woman">Woman (Twilio Default - Female)</option>
                         {availableVoices.map(voice => (
-                          <option key={voice.name} value={voice.name}>
-                            {voice.name} ({voice.lang})
+                          <option key={voice.name} value={voice.name} title={voice.name}>
+                            {voice.name.length > 40 ? voice.name.substring(0, 40) + '...' : voice.name}
                           </option>
                         ))}
                       </select>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Twilio voices (alice, man, woman) work best for phone calls
+                      </p>
                     </div>
 
                     <div>
