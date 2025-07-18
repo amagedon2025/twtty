@@ -38,8 +38,8 @@ const PhoneInterface: React.FC = () => {
     startTime: null,
     duration: '00:00:00',
     callSid: null,
-    streamingEnabled: false,
-    audioConnected: false
+    streamingEnabled: true,
+    audioConnected: true
   });
 
   const [currentMessage, setCurrentMessage] = useState('');
@@ -62,6 +62,7 @@ const PhoneInterface: React.FC = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const websocketRef = useRef<WebSocket | null>(null);
   const audioElementRef = useRef<HTMLAudioElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
 
   // Quick response templates
   const quickResponses = [
@@ -104,7 +105,9 @@ const PhoneInterface: React.FC = () => {
   useEffect(() => {
     const initAudioContext = async () => {
       try {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        if (!audioContextRef.current) {
+          audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        }
         console.log('Audio context initialized for live streaming');
       } catch (error) {
         console.error('Failed to initialize audio context:', error);
@@ -123,47 +126,70 @@ const PhoneInterface: React.FC = () => {
   // WebSocket connection for live audio streaming
   useEffect(() => {
     if (callState.isActive && callState.streamingEnabled) {
-      const wsUrl = API_BASE_URL.replace('https://', 'wss://').replace('http://', 'ws://') + '/websocket/audio-stream';
+      const wsUrl = API_BASE_URL.replace('https://', 'wss://').replace('http://', 'ws://');
       
       try {
         websocketRef.current = new WebSocket(wsUrl);
         
         websocketRef.current.onopen = () => {
-          console.log('Live audio WebSocket connected');
+          console.log('🔌 Live audio WebSocket connected');
           setCallState(prev => ({ ...prev, audioConnected: true }));
+          
+          // Join the call for audio streaming
+          if (callState.callSid) {
+            websocketRef.current?.send(JSON.stringify({
+              type: 'join-call',
+              callSid: callState.callSid
+            }));
+          }
         };
         
         websocketRef.current.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
             
-            if (data.type === 'audio' && audioContextRef.current && !audioMuted) {
-              // Decode and play audio data
-              const audioData = atob(data.payload);
-              const audioBuffer = new ArrayBuffer(audioData.length);
-              const view = new Uint8Array(audioBuffer);
-              
-              for (let i = 0; i < audioData.length; i++) {
-                view[i] = audioData.charCodeAt(i);
+            if (data.type === 'joined') {
+              console.log('🎵 Joined call audio stream:', data.callSid);
+            } else if (data.type === 'audio' && audioContextRef.current && !audioMuted) {
+              // Play live audio from Twilio media stream
+              try {
+                // Decode base64 audio payload
+                const audioData = atob(data.payload);
+                const audioBuffer = new ArrayBuffer(audioData.length);
+                const view = new Uint8Array(audioBuffer);
+                
+                for (let i = 0; i < audioData.length; i++) {
+                  view[i] = audioData.charCodeAt(i);
+                }
+                
+                // Play through Web Audio API
+                audioContextRef.current.decodeAudioData(audioBuffer.slice(0))
+                  .then(buffer => {
+                    const source = audioContextRef.current!.createBufferSource();
+                    const gainNode = audioContextRef.current!.createGain();
+                    
+                    source.buffer = buffer;
+                    gainNode.gain.value = audioVolume;
+                    
+                    source.connect(gainNode);
+                    gainNode.connect(audioContextRef.current!.destination);
+                    
+                    source.start();
+                  })
+                  .catch(error => {
+                    console.error('Audio decode error:', error);
+                  });
+              } catch (audioError) {
+                console.error('Audio processing error:', audioError);
               }
-              
-              // Play audio through Web Audio API
-              audioContextRef.current.decodeAudioData(audioBuffer)
-                .then(buffer => {
-                  const source = audioContextRef.current!.createBufferSource();
-                  const gainNode = audioContextRef.current!.createGain();
-                  
-                  source.buffer = buffer;
-                  gainNode.gain.value = audioVolume;
-                  
-                  source.connect(gainNode);
-                  gainNode.connect(audioContextRef.current!.destination);
-                  
-                  source.start();
-                })
-                .catch(error => {
-                  console.error('Audio decode error:', error);
-                });
+            } else if (data.type === 'call-ended') {
+              console.log('📞 Call ended via WebSocket');
+              setCallState(prev => ({
+                ...prev,
+                isActive: false,
+                isConnecting: false,
+                audioConnected: false
+              }));
             }
           } catch (error) {
             console.error('WebSocket message error:', error);
@@ -171,7 +197,7 @@ const PhoneInterface: React.FC = () => {
         };
         
         websocketRef.current.onclose = () => {
-          console.log('Live audio WebSocket disconnected');
+          console.log('🔌 Live audio WebSocket disconnected');
           setCallState(prev => ({ ...prev, audioConnected: false }));
         };
         
@@ -338,14 +364,12 @@ const PhoneInterface: React.FC = () => {
     try {
       console.log('Initiating live audio call to:', formattedNumber);
       
-      // Try WebRTC call first for live audio streaming
-      const response = await axios.post(`${API_BASE_URL}/api/initiate-webrtc-call`, {
-        to: formattedNumber,
-        identity: `user_${Date.now()}`
+      const response = await axios.post(`${API_BASE_URL}/api/initiate-call`, {
+        to: formattedNumber
       });
 
       if (response.data.success) {
-        console.log('Live audio call initiated successfully:', response.data);
+        console.log('✅ Optimized call initiated successfully:', response.data);
         
         setCallState(prev => ({
           ...prev,
@@ -359,42 +383,21 @@ const PhoneInterface: React.FC = () => {
         throw new Error(response.data.error || 'Failed to initiate call');
       }
     } catch (error: any) {
-      console.error('Error initiating call:', error);
+      console.error('❌ Error initiating call:', error);
       
-      // Fallback to traditional call
-      try {
-        console.log('Falling back to traditional call...');
-        const fallbackResponse = await axios.post(`${API_BASE_URL}/api/initiate-call`, {
-          to: formattedNumber
-        });
-
-        if (fallbackResponse.data.success) {
-          setCallState(prev => ({
-            ...prev,
-            isActive: true,
-            isConnecting: false,
-            startTime: new Date(),
-            callSid: fallbackResponse.data.callSid,
-            streamingEnabled: false
-          }));
-        } else {
-          throw new Error('Both WebRTC and traditional calls failed');
-        }
-      } catch (fallbackError: any) {
-        let errorMessage = 'Failed to initiate call. ';
-        if (error.response?.data?.error) {
-          errorMessage += error.response.data.error;
-        } else {
-          errorMessage += 'Check backend connection and Twilio credentials.';
-        }
-        
-        alert(errorMessage);
-        
-        setCallState(prev => ({
-          ...prev,
-          isConnecting: false
-        }));
+      let errorMessage = 'Failed to initiate call. ';
+      if (error.response?.data?.error) {
+        errorMessage += error.response.data.error;
+      } else {
+        errorMessage += 'Check backend connection and Twilio credentials.';
       }
+      
+      alert(errorMessage);
+      
+      setCallState(prev => ({
+        ...prev,
+        isConnecting: false
+      }));
     }
   };
 
