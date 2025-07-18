@@ -112,7 +112,7 @@ const PhoneInterface: React.FC = () => {
 
   // Real-time monitoring for transcriptions and recordings
   useEffect(() => {
-    if (callState.isActive && callState.callSid) {
+    if (callState.callSid) {
       statusCheckIntervalRef.current = window.setInterval(async () => {
         try {
           const response = await axios.get(`${API_BASE_URL}/api/call-status/${callState.callSid}`);
@@ -126,9 +126,7 @@ const PhoneInterface: React.FC = () => {
                 isActive: false,
                 isConnecting: false
               }));
-              setMessageHistory([]);
-              setTranscriptions([]);
-              setRecordings([]);
+              // Don't clear transcriptions when call ends - keep them visible
             }
             
             // Update transcriptions (real-time)
@@ -160,7 +158,7 @@ const PhoneInterface: React.FC = () => {
         } catch (error) {
           console.error('Error checking call status:', error);
         }
-      }, 2000); // Check every 2 seconds for faster updates
+      }, 1000); // Check every 1 second for even faster updates
     } else if (statusCheckIntervalRef.current) {
       clearInterval(statusCheckIntervalRef.current);
     }
@@ -170,7 +168,7 @@ const PhoneInterface: React.FC = () => {
         clearInterval(statusCheckIntervalRef.current);
       }
     };
-  }, [callState.isActive, callState.callSid, transcriptions.length, recordings.length]);
+  }, [callState.callSid, transcriptions.length, recordings.length]);
 
   // Update call duration
   useEffect(() => {
@@ -276,13 +274,22 @@ const PhoneInterface: React.FC = () => {
     }
 
     try {
+      // Use our backend proxy instead of direct Twilio URL
+      const proxyUrl = `${API_BASE_URL}/api/recording/${recordingSid}`;
+      
       if (audioRef.current) {
-        audioRef.current.src = recordingUrl;
+        audioRef.current.src = proxyUrl;
         audioRef.current.play();
         setCurrentlyPlaying(recordingSid);
         
         audioRef.current.onended = () => {
           setCurrentlyPlaying(null);
+        };
+        
+        audioRef.current.onerror = () => {
+          console.error('Audio playback error');
+          setCurrentlyPlaying(null);
+          alert('Unable to play recording - audio format may not be supported');
         };
       }
     } catch (error) {
@@ -609,21 +616,25 @@ const PhoneInterface: React.FC = () => {
                 </div>
 
                 {/* Real-time Transcription & Audio Playback */}
-                {callState.isActive && (
+                {(callState.isActive || transcriptions.length > 0) && (
                   <div className="border-t pt-4">
                     <h3 className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-2">
                       🎤 Their Responses (Real-time - 2-3 second updates)
-                      {transcriptions.length === 0 && (
+                      {callState.isActive && transcriptions.length === 0 && (
                         <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                       )}
                     </h3>
                     <div className="max-h-60 overflow-y-auto space-y-2 bg-blue-50 rounded-lg p-3">
-                      {transcriptions.length === 0 ? (
+                      {callState.isActive && transcriptions.length === 0 ? (
                         <div className="text-sm text-blue-600 italic">
                           🎧 Listening for their response... Real-time transcription active.
                           <div className="text-xs mt-1 text-blue-500">
-                            (Updates every 2-3 seconds - much faster than before!)
+                            (Updates every 1-2 seconds - even faster now!)
                           </div>
+                        </div>
+                      ) : transcriptions.length === 0 ? (
+                        <div className="text-sm text-slate-500 italic">
+                          No responses received yet. Transcriptions will appear here.
                         </div>
                       ) : (
                         transcriptions.map((transcription, index) => (
@@ -655,6 +666,11 @@ const PhoneInterface: React.FC = () => {
                         ))
                       )}
                     </div>
+                    {!callState.isActive && transcriptions.length > 0 && (
+                      <div className="text-xs text-blue-600 mt-2 p-2 bg-blue-100 rounded">
+                        ✅ Call ended. Final transcriptions received and displayed above.
+                      </div>
+                    )}
                   </div>
                 )}
 
