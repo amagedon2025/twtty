@@ -177,6 +177,48 @@ app.post('/webhook/transcription', (req, res) => {
       
       console.log(`🎵 Audio recording available for call ${CallSid}: ${RecordingUrl}`);
     }
+  } else if (CallSid) {
+    // Handle transcriptions that arrive after call ends
+    console.log(`⚠️ Transcription received for ended call ${CallSid}, storing temporarily`);
+    
+    // Store in a temporary map for recently ended calls
+    if (!global.recentCallTranscriptions) {
+      global.recentCallTranscriptions = new Map();
+    }
+    
+    if (!global.recentCallTranscriptions.has(CallSid)) {
+      global.recentCallTranscriptions.set(CallSid, {
+        transcriptions: [],
+        recordings: []
+      });
+    }
+    
+    const tempData = global.recentCallTranscriptions.get(CallSid);
+    
+    if (TranscriptionStatus === 'completed' && TranscriptionText && TranscriptionText.trim()) {
+      tempData.transcriptions.push({
+        text: TranscriptionText.trim(),
+        timestamp: new Date(),
+        recordingSid: RecordingSid,
+        recordingUrl: RecordingUrl
+      });
+    }
+    
+    if (RecordingUrl) {
+      tempData.recordings.push({
+        url: RecordingUrl,
+        timestamp: new Date(),
+        recordingSid: RecordingSid,
+        transcription: TranscriptionText || null
+      });
+    }
+    
+    // Clean up after 5 minutes
+    setTimeout(() => {
+      if (global.recentCallTranscriptions && global.recentCallTranscriptions.has(CallSid)) {
+        global.recentCallTranscriptions.delete(CallSid);
+      }
+    }, 300000);
   }
   
   res.status(200).send('OK');
@@ -317,7 +359,32 @@ app.get('/api/call-status/:callSid', async (req, res) => {
     const { callSid } = req.params;
     
     const callData = activeCalls.get(callSid);
-    if (!callData) {
+    
+    let transcriptions = [];
+    let recordings = [];
+    let isActive = false;
+    let status = 'completed';
+    let startTime = null;
+    let messagesSent = [];
+    
+    if (callData) {
+      // Active or recently ended call
+      transcriptions = callData.transcriptions || [];
+      recordings = callData.recordings || [];
+      isActive = callData.isActive;
+      status = callData.status;
+      startTime = callData.startTime;
+      messagesSent = callData.messagesSent || [];
+    }
+    
+    // Check for transcriptions that arrived after call ended
+    if (global.recentCallTranscriptions && global.recentCallTranscriptions.has(callSid)) {
+      const tempData = global.recentCallTranscriptions.get(callSid);
+      transcriptions = [...transcriptions, ...tempData.transcriptions];
+      recordings = [...recordings, ...tempData.recordings];
+    }
+    
+    if (!callData && transcriptions.length === 0) {
       return res.status(404).json({ 
         success: false, 
         error: 'Call not found' 
@@ -326,12 +393,12 @@ app.get('/api/call-status/:callSid', async (req, res) => {
     
     res.json({
       success: true,
-      status: callData.status,
-      isActive: callData.isActive,
-      startTime: callData.startTime,
-      transcriptions: callData.transcriptions || [],
-      recordings: callData.recordings || [], // For audio playback
-      messagesSent: callData.messagesSent || []
+      status: status,
+      isActive: isActive,
+      startTime: startTime,
+      transcriptions: transcriptions,
+      recordings: recordings,
+      messagesSent: messagesSent
     });
   } catch (error) {
     console.error('❌ Error fetching call status:', error);
@@ -385,6 +452,44 @@ app.get('/api/active-calls', (req, res) => {
     success: true, 
     activeCalls: calls
   });
+});
+
+// Proxy Twilio recordings with authentication
+app.get('/api/recording/:recordingSid', async (req, res) => {
+  try {
+    const { recordingSid } = req.params;
+    
+    // Construct the authenticated Twilio URL
+    const recordingUrl = `https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Recordings/${recordingSid}`;
+    
+    console.log(`Proxying recording: ${recordingSid}`);
+    
+    // Fetch the recording with Twilio credentials
+    const response = await fetch(recordingUrl, {
+      headers: {
+        'Authorization': 'Basic ' + Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Twilio API error: ${response.status}`);
+    }
+    
+    // Stream the audio data
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Content-Disposition', `inline; filename="recording-${recordingSid}.wav"`);
+    
+    // Pipe the response
+    const buffer = await response.arrayBuffer();
+    res.send(Buffer.from(buffer));
+    
+  } catch (error) {
+    console.error('❌ Error proxying recording:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to fetch recording' 
+    });
+  }
 });
 
 app.listen(port, () => {
