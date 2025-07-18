@@ -96,7 +96,7 @@ app.post('/twiml/listen-mode', (req, res) => {
 
 // TwiML endpoint for speaking messages (then return to listening)
 app.post('/twiml/speak-message', (req, res) => {
-  const { message, voice = 'alice', rate = '1.0' } = req.query;
+  const { message, voice = 'alice', rate = '1.0' } = req.body;
   const { CallSid } = req.body;
   
   console.log(`Speaking message to call ${CallSid}: "${message}"`);
@@ -104,9 +104,20 @@ app.post('/twiml/speak-message', (req, res) => {
   const twiml = new twilio.twiml.VoiceResponse();
   
   if (message) {
+    // Map complex voice names to simple Twilio voices
+    let twilioVoice = 'alice'; // Default
+    if (voice && typeof voice === 'string') {
+      const voiceLower = voice.toLowerCase();
+      if (voiceLower.includes('male')) {
+        twilioVoice = voiceLower.includes('british') ? 'man' : 'man';
+      } else if (voiceLower.includes('female') || voiceLower.includes('woman')) {
+        twilioVoice = voiceLower.includes('british') ? 'woman' : 'alice';
+      }
+    }
+    
     // Speak the message clearly
     twiml.say({
-      voice: voice,
+      voice: twilioVoice,
       rate: rate
     }, message);
     
@@ -254,17 +265,37 @@ app.post('/api/speak-text', async (req, res) => {
 
     console.log(`Sending message to call ${callSid}: "${text}"`);
     
-    // Update the call to speak the message once, then return to listening
+    // Map complex voice names to simple Twilio voices
+    let twilioVoice = 'alice'; // Default
+    if (voice && typeof voice === 'string') {
+      const voiceLower = voice.toLowerCase();
+      if (voiceLower.includes('male')) {
+        twilioVoice = voiceLower.includes('british') ? 'man' : 'man';
+      } else if (voiceLower.includes('female') || voiceLower.includes('woman')) {
+        twilioVoice = voiceLower.includes('british') ? 'woman' : 'alice';
+      }
+    }
+    
+    // Create TwiML for speaking the message
+    const speakTwiML = `<Response>
+      <Say voice="${twilioVoice}" rate="${rate}">${text.replace(/[<>&"']/g, (match) => {
+        const escapeMap = { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' };
+        return escapeMap[match];
+      })}</Say>
+      <Pause length="1"/>
+      <Redirect>${getBaseUrl()}/twiml/listen-mode</Redirect>
+    </Response>`;
+    
+    // Update the call with TwiML directly instead of using URL parameters
     await client.calls(callSid).update({
-      url: `${getBaseUrl()}/twiml/speak-message?message=${encodeURIComponent(text)}&voice=${voice}&rate=${rate}`,
-      method: 'POST'
+      twiml: speakTwiML
     });
 
     // Track sent messages
     callData.messagesSent.push({
       text,
       timestamp: new Date(),
-      voice,
+      voice: twilioVoice,
       rate
     });
 
