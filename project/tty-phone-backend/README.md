@@ -9,7 +9,7 @@ A web-based TTY communication tool for deaf and mute users with real-time speech
 - ✅ **Real Phone Calls**: Working with Twilio integration
 - ✅ **2-Way Communication**: Messages spoken + responses transcribed
 - ✅ **Real-time Transcription**: Speech-to-text working properly
-- ✅ **Twilio Phone Number**: +18555945773
+- ✅ **Twilio Phone Number**: 
 
 ## 🎯 How It Works
 
@@ -20,7 +20,7 @@ A web-based TTY communication tool for deaf and mute users with real-time speech
 4. **Conference-based** → Reliable connection with automatic recording for transcription
 
 ### Key Features
-- **📞 Real Phone Calls**: Call any phone number worldwide using +18555945773
+- **📞 Real Phone Calls**: Call any phone number worldwide using 
 - **🗣️ Text-to-Speech**: Your messages spoken clearly with adjustable voice settings
 - **📝 Speech-to-Text**: Their responses automatically transcribed in real-time
 - **⚡ Quick Responses**: Pre-set phrases for faster communication
@@ -35,9 +35,9 @@ Your backend is running at: `https://tty-phone-interface.onrender.com`
 
 **Environment Variables (configured in Render):**
 ```env
-TWILIO_ACCOUNT_SID=AC06624773e19bd0bccd13056620124e33
-TWILIO_AUTH_TOKEN=82298fcad555913155e00953cd50336b
-TWILIO_PHONE_NUMBER=+18555945773
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_PHONE_NUMBER=
 PORT=10000
 NODE_ENV=production
 ```
@@ -54,7 +54,7 @@ npm run dev
 
 ### Making Your First Call
 1. **Enter Phone Number**: Use format `(555) 123-4567` or `+15551234567`
-2. **Click "Call"**: Wait 2-3 seconds for connection from +18555945773
+2. **Click "Call"**: Wait 2-3 seconds for connection from 
 3. **Start Typing**: Use the large text area for your message
 4. **Send Message**: Click "Speak Message" or press `Ctrl+Enter`
 5. **Listen for Response**: The other person will hear your message clearly
@@ -81,7 +81,7 @@ Frontend (React + TypeScript) [Local]
     ↕ HTTPS Requests
 Backend (Node.js + Express) [Render]
     ↕ Twilio API
-Twilio Conference System (+18555945773)
+Twilio Conference System (+15555555555)
     ↕ Phone Network
 Recipient's Phone
 ```
@@ -117,7 +117,7 @@ Customize how your messages sound:
 
 **"Call connection issues"**
 - Check phone number format (include country code for international)
-- Verify the number can receive calls from +18555945773
+- Verify the number can receive calls from +15555555555
 - Some carriers may block automated calls - try a different number
 
 **"Backend connection errors"**
@@ -136,7 +136,7 @@ Customize how your messages sound:
 
 ### Twilio Pricing (Approximate)
 - **Outbound Calls**: ~$0.013 per minute (US)
-- **Phone Number**: ~$1.15 per month (+18555945773)
+- **Phone Number**: ~$1.15 per month (+15555555555)
 - **Recording/Transcription**: ~$0.0025 per minute
 - **Conference**: ~$0.0025 per participant per minute
 
@@ -159,8 +159,8 @@ Customize how your messages sound:
 ### Current Setup
 - **Backend**: ✅ Deployed on Render (`https://tty-phone-interface.onrender.com`)
 - **Frontend**: ✅ Running locally (`http://localhost:5173`)
-- **Twilio Integration**: ✅ Configured with Account SID: AC06624773e19bd0bccd13056620124e33
-- **Twilio Phone Number**: ✅ +18555945773
+- **Twilio Integration**: ✅ Configured with Account SID: 
+- **Twilio Phone Number**: ✅ +15555555555
 - **2-Way Communication**: ✅ Working with real-time transcription
 - **Webhook Endpoints**: ✅ Configured for transcription callbacks
 
@@ -185,13 +185,13 @@ Your TTY Phone Interface is **fully deployed and ready for daily use**:
 
 1. **Frontend**: Start with `npm run dev` at `http://localhost:5173`
 2. **Backend**: Deployed at `https://tty-phone-interface.onrender.com`
-3. **Real Calls**: Make actual phone calls with 2-way communication using +18555945773
+3. **Real Calls**: Make actual phone calls with 2-way communication using +15555555555
 4. **Transcription**: Real-time speech-to-text working with webhook system
 
 **Start making calls now!** The system provides complete 2-way TTY communication with professional-quality speech synthesis and real-time transcription.
 
 ### How Recipients See Your Calls
-- **Caller ID**: Shows your Twilio number +18555945773
+- **Caller ID**: Shows your Twilio number +15555555555
 - **Initial Message**: "Hello, you are now connected to a TTY communication service..."
 - **Your Messages**: Spoken clearly in natural voice
 - **Their Responses**: Automatically transcribed for you to read
